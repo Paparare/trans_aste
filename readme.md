@@ -7,4 +7,5 @@ run train.py
 
 action+sent contrastive: https://colab.research.google.com/drive/1GkokaigioUM-vUxDyPEiw4SV-UZMApMS?usp=sharing
 
-21年的BART因为用的版本老，所以在本地跑的，源repo在https://github.com/yhcc/BARTABSA/tree/main，把peng/data的train融合了之后，改peng/train.py的training set跑4个数据集分别的testing set
+21年的BART因为用的版本老，所以在本地跑的，源repo在https://github.com/yhcc/BARTABSA/tree/main
+把peng/data的train融合了之后，改peng/train.py的training set跑4个数据集分别的testing set
