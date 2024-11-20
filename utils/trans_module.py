@@ -174,23 +174,6 @@ class TransitionModel(nn.Module):
 
         self.init_weight()
 
-    def contrastive_loss(self, anchor, positive, negative, margin=1.0):
-        # Ensure tensors have consistent shapes for cosine similarity
-        min_len = min(anchor.size(0), positive.size(0), negative.size(0))
-
-        # Trim all to the same length along the sequence dimension
-        anchor = anchor[:min_len]
-        positive = positive[:min_len]
-        negative = negative[:min_len]
-
-        # Compute cosine similarity along the feature dimension (dim=1)
-        pos_sim = F.cosine_similarity(anchor, positive, dim=1)
-        neg_sim = F.cosine_similarity(anchor, negative, dim=1)
-
-        # Margin-based loss
-        loss = F.relu(neg_sim - pos_sim + margin)
-        return loss.mean()
-
     def init_weight(self):
         for name, param in self.named_parameters():
             if name.find("weight") != -1:
@@ -221,6 +204,32 @@ class TransitionModel(nn.Module):
         output_list = [outputs_permute[i][al - 1] for i, al in enumerate(action_len_list)]
         output_stack = torch.stack(output_list)
         return output_stack
+
+    def contrastive_loss(self, action_logits, true_action_tensor):
+
+        action_probs = F.softmax(action_logits, dim=1)
+        pred_action = action_probs.argmax(dim=1)
+
+        pred_action_embed = self.action_embedding(pred_action)  # [batch_size, action_ebd_dim]
+        true_action_embed = self.action_embedding(true_action_tensor)  # [batch_size, action_ebd_dim]
+
+        sim_matrix = F.cosine_similarity(
+            pred_action_embed.unsqueeze(1),  # [batch_size, 1, action_ebd_dim]
+            true_action_embed.unsqueeze(0),  # [1, batch_size, action_ebd_dim]
+            dim=2
+        )
+
+        positive_mask = torch.eye(sim_matrix.size(0)).cuda()
+        negative_mask = 1 - positive_mask
+        exp_sim = torch.exp(sim_matrix)
+        pos_sim = (exp_sim * positive_mask).sum(dim=1)
+
+        all_sim = (exp_sim * (positive_mask + negative_mask)).sum(dim=1)
+
+        loss = -torch.log(pos_sim / all_sim)
+
+        return loss.mean()
+
 
     def train_mode(self, word_reps_list, parser_state_list):
         true_action_list, distance_list = [], []
@@ -256,10 +265,16 @@ class TransitionModel(nn.Module):
         # print("Anchor shape:", anchor.shape)
         # print("Positive shape:", positive.shape)
         # print("Negative shape:", negative.shape)
-        # Compute contrastive loss
-        contrastive_loss_value = self.contrastive_loss(anchor, positive, negative)
 
-        # LSTM processing of stack and buffer representations
+        # contrastive_loss_value = self.contrastive_loss(anchor, positive, negative)
+        #
+        # contrastive_loss_value = 0
+        # for label in torch.unique(true_sent_tensor):
+        #     mask = (true_sent_tensor == label)
+        #     if torch.sum(mask) > 1:  # Need at least 2 samples
+        #         label_reps = stack_reps[mask]
+        #         contrastive_loss_value += self.contrastive_loss(label_reps, label_reps)
+
         sk_reps_packed = pack_sequence(sk_reps_list, enforce_sorted=False)
         bf_reps_packed = pack_sequence(bf_reps_list, enforce_sorted=False)
         sk_lstm_out_packed, _ = self.stack_lstm(sk_reps_packed)
@@ -270,7 +285,6 @@ class TransitionModel(nn.Module):
         bf_reps_list = [bf_lstm_out_padded[i][:bf_len] for i, bf_len in enumerate(bf_len_tensor)]
         hist_action_tensor = self.action_encoder(parser_state_list)
 
-        # Concatenate representations and compute action and sentiment logits
         state_reps_list = []
         for sk_reps, bf_reps in zip(sk_reps_list, bf_reps_list):
             state_reps = torch.cat([sk_reps[-2], sk_reps[-1], bf_reps[0]])
@@ -286,11 +300,14 @@ class TransitionModel(nn.Module):
         action_logits = self.action_MLP(final_feat_tensor)
         sent_logits = self.sent_mlp(final_feat_tensor)
 
-        # Original action and sentiment loss
+        contrastive_loss_value = self.contrastive_loss(action_logits, true_action_tensor)
+        contrastive_loss_value_senti = self.contrastive_loss(sent_logits, true_sent_tensor)
+
         action_loss = F.cross_entropy(action_logits, true_action_tensor)
         sentiment_loss = F.cross_entropy(sent_logits, true_sent_tensor)
 
-        total_loss =  action_loss + sentiment_loss
+        beta_cl = 0.1
+        total_loss = action_loss + sentiment_loss + beta_cl * (contrastive_loss_value+contrastive_loss_value_senti)
 
         return total_loss, action_logits, sent_logits, true_action_tensor, true_sent_tensor
 
