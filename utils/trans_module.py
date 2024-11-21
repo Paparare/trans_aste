@@ -205,29 +205,30 @@ class TransitionModel(nn.Module):
         output_stack = torch.stack(output_list)
         return output_stack
 
-    def contrastive_loss(self, action_logits, true_action_tensor, eps=1e-8):
-
+        def contrastive_loss(self, action_logits, true_action_tensor):
         action_probs = F.softmax(action_logits, dim=1)
         pred_action = action_probs.argmax(dim=1)
-    
+
         pred_action_embed = self.action_embedding(pred_action)  # [batch_size, action_ebd_dim]
         true_action_embed = self.action_embedding(true_action_tensor)  # [batch_size, action_ebd_dim]
-    
+
         sim_matrix = F.cosine_similarity(
-            pred_action_embed.unsqueeze(1), 
-            true_action_embed.unsqueeze(0),
+            pred_action_embed.unsqueeze(1),  # [batch_size, 1, action_ebd_dim]
+            true_action_embed.unsqueeze(0),  # [1, batch_size, action_ebd_dim]
             dim=2
         )
-    
-        positive_mask = torch.eye(sim_matrix.size(0)).cuda()  # Identity matrix as mask for true pairs
+
+        positive_mask = torch.eye(sim_matrix.size(0)).cuda()
+        negative_mask = 1 - positive_mask
+
         exp_sim = torch.exp(sim_matrix)
-        
+
         pos_sim = (exp_sim * positive_mask).sum(dim=1)
-        
-        all_sim = exp_sim.sum(dim=1) + eps  # Add eps to avoid divide-by-zero
-        
-        loss = -torch.log(pos_sim / all_sim + eps)  # Add eps inside log for numerical stability
-        
+
+        all_sim = (exp_sim * (positive_mask + negative_mask)).sum(dim=1)
+
+        loss = -torch.log(pos_sim / all_sim)
+
         return loss.mean()
 
 
