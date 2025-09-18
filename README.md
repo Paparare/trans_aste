@@ -114,7 +114,3 @@ This project is funded by Shanghai Pujiang Program (22PJC063) awarded to Hai Hu.
 ## 📄 License
 
 This project is licensed under the MIT License - see the LICENSE file for details.
-
-## 🔗 Code Availability
-
-Code is available at: https://anonymous.4open.science/r/trans_aste-8FCF
